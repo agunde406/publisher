@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::collections::HashMap;
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 
 // ~~~~~~~~~~~~~  Trait Definations ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -91,7 +92,7 @@ impl PublishedResult for PublishBatchResult {
 }
 
 /// This implementation could go into Scabbard
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct BatchContext {
     circuit_id: String,
     service_id: String,
@@ -306,7 +307,118 @@ impl PublishManager {
     }
 }
 
+/// Messages that will be sent to the Manager
+enum PublishMessage2 {
+    Cancel,
+    Finish,
+}
+
+struct PublishPool {
+    publishing_batches: HashMap<BatchContext, Sender<PublishMessage2>>,
+    join_handles: HashMap<
+        BatchContext,
+        thread::JoinHandle<Result<Option<PublishBatchResult>, InternalError>>,
+    >,
+}
+
+impl PublishPool {
+    pub fn new() -> Self {
+        Self {
+            publishing_batches: HashMap::new(),
+            join_handles: HashMap::new(),
+        }
+    }
+
+    // shutdown any running publishing threads
+    pub fn shutdown(self) {
+        for (_, sender) in self.publishing_batches {
+            sender.send(PublishMessage2::Cancel).unwrap();
+        }
+
+        for (_, join_handle) in self.join_handles {
+            join_handle.join().unwrap();
+        }
+    }
+}
+
+impl Publisher<BatchContext, PublishBatchResult> for PublishPool {
+    fn start(&mut self, context: BatchContext) -> Result<(), InternalError> {
+        // TODO Check to make sure their is not another batch/block already being published for
+        // current context
+
+        let (sender, rc) = channel();
+        let join_handle = thread::spawn(move || loop {
+            // Set up using the batch verifier and pending queue to start processing
+            // the batches and creating the results
+            // TODO this is dependent on the unknown PendingQueue and BatchVerifier API
+
+            // Check to see if the batch result should be finished/canceled
+            match rc.try_recv() {
+                Ok(PublishMessage2::Cancel) => {
+                    println!("Received Cancel");
+
+                    // TODO cancel running batch verifier work
+
+                    return Ok(None);
+                }
+                Ok(PublishMessage2::Finish) => {
+                    println!("Received Finish");
+
+                    // TODO finish up the thread
+
+                    return Ok(Some(PublishBatchResult {
+                        state_root_hash: "1234".to_string(),
+                        receipts: vec![],
+                    }));
+                }
+                Err(TryRecvError::Empty) => (),
+                Err(_) => {
+                    println!("Disconnected");
+                    return Err(InternalError);
+                }
+            };
+        });
+
+        self.publishing_batches.insert(context.clone(), sender);
+        self.join_handles.insert(context, join_handle);
+
+        Ok(())
+    }
+
+    fn finish(&mut self, context: BatchContext) -> Result<PublishBatchResult, InternalError> {
+        if let Some(sender) = self.publishing_batches.remove(&context) {
+            sender.send(PublishMessage2::Finish).unwrap()
+        } else {
+            return Err(InternalError); // no running publishing thread for context
+        }
+
+        if let Some(join_handle) = self.join_handles.remove(&context) {
+            // TODO clean this up
+            Ok(join_handle.join().unwrap().unwrap().unwrap())
+        } else {
+            return Err(InternalError); // no join handle
+        }
+    }
+
+    fn cancel(&mut self, context: BatchContext) -> Result<(), InternalError> {
+        if let Some(sender) = self.publishing_batches.remove(&context) {
+            sender.send(PublishMessage2::Cancel).unwrap()
+        } else {
+            return Err(InternalError); // no running publishing thread for context
+        }
+
+        if let Some(join_handle) = self.join_handles.remove(&context) {
+            join_handle.join().unwrap();
+            Ok(())
+        } else {
+            return Err(InternalError); // no join handle
+        }
+    }
+}
+
 fn main() {
+    // ~~~~~~~~~~~~~~~ PublishManager Example ~~~~~~~~~~~~~
+    println!("Staring PublishManager tests");
     let mut publisher_manager = PublishManager::new();
     publisher_manager.start();
 
@@ -336,4 +448,22 @@ fn main() {
     );
 
     publisher_manager.shutdown();
+
+    // ~~~~~~~~~~~~~~~ PublishPool Example ~~~~~~~~~~~~~
+    println!("Staring PublishPool tests, using the same context");
+    let mut publisher = PublishPool::new();
+
+    publisher.start(context.clone()).unwrap();
+    publisher.cancel(context.clone()).unwrap();
+
+    publisher.start(context.clone()).unwrap();
+    let batch_result = publisher.finish(context.clone()).unwrap();
+
+    println!(
+        "Received publish result with agreed bytes {:?} and txn receipts {:?}",
+        batch_result.get_bytes().unwrap(),
+        batch_result.receipts,
+    );
+
+    publisher.shutdown();
 }
