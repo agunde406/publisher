@@ -14,7 +14,7 @@
 
 //! Example implmentations, currently return test data but could be updated actually use transact
 use super::{
-    Batch, BatchExecutionResult, BatcheVerifier, BatcheVerifierFactory, InternalError,
+    Batch, BatchExecutionResult, BatchVerifier, BatchVerifierFactory, InternalError,
     PendingBatches, PublishedResult, PublishedResultCreator, PublishedResultCreatorFactory,
     PublisherContext, TransactionReceipt,
 };
@@ -127,11 +127,11 @@ impl OneBatchVerifierFactory {
     }
 }
 
-impl BatcheVerifierFactory<OneBatch, BatchContext> for OneBatchVerifierFactory {
+impl BatchVerifierFactory<OneBatch, BatchContext> for OneBatchVerifierFactory {
     fn start(
         &mut self,
         context: BatchContext,
-    ) -> Result<Box<dyn BatcheVerifier<OneBatch, BatchContext>>, InternalError> {
+    ) -> Result<Box<dyn BatchVerifier<OneBatch, BatchContext>>, InternalError> {
         Ok(Box::new(OneBatchVerifier {
             _context: context,
             batch: None,
@@ -145,7 +145,7 @@ pub struct OneBatchVerifier {
     batch: Option<OneBatch>,
 }
 
-impl BatcheVerifier<OneBatch, BatchContext> for OneBatchVerifier {
+impl BatchVerifier<OneBatch, BatchContext> for OneBatchVerifier {
     fn add_batch(&mut self, batch: OneBatch) -> Result<(), InternalError> {
         self.batch = Some(batch);
         Ok(())
@@ -181,7 +181,7 @@ impl BatchIter {
 }
 
 impl PendingBatches<OneBatch> for BatchIter {
-    fn next(&mut self) -> Option<OneBatch> {
-        self.batch.take()
+    fn next(&mut self) -> Result<Option<OneBatch>, InternalError> {
+        Ok(self.batch.take())
     }
 }
