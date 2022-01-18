@@ -24,7 +24,7 @@ struct PublishStarter<
     R: 'static + PublishedResult,
 > {
     result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
-    batch_verifier_factory: Box<dyn BatcheVerifierFactory<B, C>>,
+    batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
 }
 
 impl<B: 'static + Batch, C: 'static + PublisherContext, R: 'static + PublishedResult>
@@ -32,7 +32,7 @@ impl<B: 'static + Batch, C: 'static + PublisherContext, R: 'static + PublishedRe
 {
     pub fn new(
         result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
-        batch_verifier_factory: Box<dyn BatcheVerifierFactory<B, C>>,
+        batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
     ) -> Self {
         Self {
             result_creator_factory,
@@ -65,7 +65,7 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> 
             // TODO fix very tight loop here
             // Should the batch verifier take the iterator here instead of a having a batch passed
             //  one by one?
-            if let Some(batch) = batches.next() {
+            if let Some(batch) = batches.next()? {
                 verifier.add_batch(batch)?;
             }
 
@@ -234,11 +234,11 @@ pub trait Batch: Send {
     fn id(&self) -> String;
 }
 
-pub trait BatcheVerifierFactory<B: Batch, C: PublisherContext> {
-    fn start(&mut self, context: C) -> Result<Box<dyn BatcheVerifier<B, C>>, InternalError>;
+pub trait BatchVerifierFactory<B: Batch, C: PublisherContext> {
+    fn start(&mut self, context: C) -> Result<Box<dyn BatchVerifier<B, C>>, InternalError>;
 }
 
-pub trait BatcheVerifier<B: Batch, C: PublisherContext>: Send {
+pub trait BatchVerifier<B: Batch, C: PublisherContext>: Send {
     fn add_batch(&mut self, batch: B) -> Result<(), InternalError>;
 
     fn finalize(&mut self) -> Result<Vec<BatchExecutionResult<B>>, InternalError>;
@@ -247,7 +247,7 @@ pub trait BatcheVerifier<B: Batch, C: PublisherContext>: Send {
 }
 
 pub trait PendingBatches<B: Batch>: Send {
-    fn next(&mut self) -> Option<B>;
+    fn next(&mut self) -> Result<Option<B>, InternalError>;
 }
 
 /// This struct could go into sawtooth-lib
