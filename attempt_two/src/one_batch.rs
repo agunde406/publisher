@@ -38,8 +38,8 @@ pub struct BatchContext {
 impl BatchContext {
     pub fn new(circuit_id: String, service_id: String, starting_commit_hash: String) -> Self {
         BatchContext {
-            _circuit_id:circuit_id,
-            _service_id:service_id,
+            _circuit_id: circuit_id,
+            _service_id: service_id,
             _starting_commit_hash: starting_commit_hash,
             batch_results: Vec::new(),
         }

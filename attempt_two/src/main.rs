@@ -17,7 +17,13 @@ use std::marker::PhantomData;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
 
-// ~~~~~~~~~~~~~  Publisher Struct Definations ~~~~~~~~~~~~~~~~~~~~~~~~~
+enum PublishMessage {
+    Cancel,
+    Finish,
+    Dropped,
+}
+
+// ~~~~~~~~~~~~~  Publisher Struct Definitions ~~~~~~~~~~~~~~~~~~~~~~~~~
 struct PublishStarter<
     B: 'static + Batch,
     C: 'static + PublisherContext,
@@ -109,14 +115,6 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> 
 
         Ok(PublishFinisher::new(sender, join_handle))
     }
-}
-
-/// Messages that will be sent to the Manager
-
-enum PublishMessage {
-    Cancel,
-    Finish,
-    Dropped,
 }
 
 struct PublishFinisher<B: Batch, C: PublisherContext, R: PublishedResult> {
