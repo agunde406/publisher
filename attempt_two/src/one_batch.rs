@@ -27,20 +27,20 @@ pub struct PublishBatchResult {
 
 impl PublishedResult for PublishBatchResult {}
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct BatchContext {
-    circuit_id: String,
-    service_id: String,
-    starting_commit_hash: String,
+    _circuit_id: String,
+    _service_id: String,
+    _starting_commit_hash: String,
     batch_results: Vec<(String, Vec<TransactionReceipt>)>,
 }
 
 impl BatchContext {
     pub fn new(circuit_id: String, service_id: String, starting_commit_hash: String) -> Self {
         BatchContext {
-            circuit_id,
-            service_id,
-            starting_commit_hash,
+            _circuit_id:circuit_id,
+            _service_id:service_id,
+            _starting_commit_hash: starting_commit_hash,
             batch_results: Vec::new(),
         }
     }

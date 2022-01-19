@@ -255,11 +255,11 @@ pub trait PendingBatches<B: Batch>: Send {
 pub struct InternalError;
 
 /// This struct is in sawtooth-lib
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TransactionReceipt;
 
 /// Result of executing a batch.
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct BatchExecutionResult<B: Batch> {
     /// The `BatchPair` which was executed.
     pub batch: B,
