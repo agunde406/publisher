@@ -17,7 +17,13 @@ use std::marker::PhantomData;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
 
-// ~~~~~~~~~~~~~  Publisher Struct Definations ~~~~~~~~~~~~~~~~~~~~~~~~~
+enum PublishMessage {
+    Cancel,
+    Finish,
+    Dropped,
+}
+
+// ~~~~~~~~~~~~~  Publisher Struct Definitions ~~~~~~~~~~~~~~~~~~~~~~~~~
 struct PublishStarter<
     B: 'static + Batch,
     C: 'static + PublisherContext,
@@ -109,14 +115,6 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> 
 
         Ok(PublishFinisher::new(sender, join_handle))
     }
-}
-
-/// Messages that will be sent to the Manager
-
-enum PublishMessage {
-    Cancel,
-    Finish,
-    Dropped,
 }
 
 struct PublishFinisher<B: Batch, C: PublisherContext, R: PublishedResult> {
@@ -255,11 +253,11 @@ pub trait PendingBatches<B: Batch>: Send {
 pub struct InternalError;
 
 /// This struct is in sawtooth-lib
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TransactionReceipt;
 
 /// Result of executing a batch.
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct BatchExecutionResult<B: Batch> {
     /// The `BatchPair` which was executed.
     pub batch: B,
