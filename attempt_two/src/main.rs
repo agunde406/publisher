@@ -311,5 +311,8 @@ fn main() -> Result<(), InternalError> {
 
     let publisher_finisher = publisher_starter.start(context, pending_batches)?;
     drop(publisher_finisher);
+
+    // add sleep to make sure we can see the drop print out
+    std::thread::sleep(std::time::Duration::from_secs(1));
     Ok(())
 }
