@@ -32,8 +32,9 @@ pub struct BatchContext {
     _circuit_id: String,
     _service_id: String,
     _starting_commit_hash: String,
-    batch_results: Vec<(String, Vec<TransactionReceipt>)>,
+    batch_results: Vec<BatchExecutionResult<OneBatch>>,
 }
+
 
 impl BatchContext {
     pub fn new(circuit_id: String, service_id: String, starting_commit_hash: String) -> Self {
@@ -47,9 +48,9 @@ impl BatchContext {
 }
 
 /// This implementation could go into Scabbard
-impl PublisherContext for BatchContext {
-    fn add_batch_result(&mut self, batch_id: String, receipts: Vec<TransactionReceipt>) {
-        self.batch_results.push((batch_id, receipts))
+impl PublisherContext<OneBatch> for BatchContext {
+    fn add_batch_results(&mut self, batch_results: Vec<BatchExecutionResult<OneBatch>>) {
+        self.batch_results.extend(batch_results)
     }
 
     fn compute_state_id(
