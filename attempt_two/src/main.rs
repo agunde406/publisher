@@ -24,17 +24,17 @@ enum PublishMessage {
 }
 
 // ~~~~~~~~~~~~~  Publisher Struct Definitions ~~~~~~~~~~~~~~~~~~~~~~~~~
-struct PublishStarter<
+struct PublishFactory<
     B: 'static + Batch,
-    C: 'static + PublisherContext,
+    C: 'static + PublisherContext<B>,
     R: 'static + PublishedResult,
 > {
     result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
     batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
 }
 
-impl<B: 'static + Batch, C: 'static + PublisherContext, R: 'static + PublishedResult>
-    PublishStarter<B, C, R>
+impl<B: 'static + Batch, C: 'static + PublisherContext<B>, R: 'static + PublishedResult>
+    PublishFactory<B, C, R>
 {
     pub fn new(
         result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
@@ -47,7 +47,7 @@ impl<B: 'static + Batch, C: 'static + PublisherContext, R: 'static + PublishedRe
     }
 }
 
-impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> {
+impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> PublishFactory<B, C, R> {
     /// Start building the next publishable unit, referred to as a block going forward
     /// The publisher will start pulling batches off of a pending queue for the provided service
     /// and
@@ -57,13 +57,13 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> 
     /// * `context` - Implementation specific context for the publisher
     /// * `batches` - An interator the returns the next batch to execute
     ///
-    /// Returns a PublishFinisher that can be used to finish or cancel the executing batch
+    /// Returns a PublishHandle that can be used to finish or cancel the executing batch
     ///
     fn start(
         &mut self,
         mut context: C,
         mut batches: Box<dyn PendingBatches<B>>,
-    ) -> Result<PublishFinisher<B, C, R>, InternalError> {
+    ) -> Result<PublishHandle<B, C, R>, InternalError> {
         let (sender, rc) = channel();
         let mut verifier = self.batch_verifier_factory.start(context.clone())?;
         let result_creator = self.result_creator_factory.new_creator()?;
@@ -90,12 +90,12 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> 
                     let results = verifier.finalize()?;
 
                     let mut txn_receipts = Vec::new();
-                    for batch_result in results.iter() {
-                        let id = batch_result.batch.id();
-                        context.add_batch_result(id, batch_result.receipts.to_vec());
 
+                    for batch_result in results.iter() {
                         txn_receipts.append(&mut batch_result.receipts.to_vec())
                     }
+
+                    context.add_batch_results(results.to_vec());
 
                     let state_root = context.compute_state_id(&txn_receipts)?;
 
@@ -113,18 +113,18 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> 
             };
         });
 
-        Ok(PublishFinisher::new(sender, join_handle))
+        Ok(PublishHandle::new(sender, join_handle))
     }
 }
 
-struct PublishFinisher<B: Batch, C: PublisherContext, R: PublishedResult> {
+struct PublishHandle<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
     sender: Option<Sender<PublishMessage>>,
     join_handle: Option<thread::JoinHandle<Result<Option<R>, InternalError>>>,
     _context: PhantomData<C>,
     _batch: PhantomData<B>,
 }
 
-impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishFinisher<B, C, R> {
+impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishHandle<B, C, R> {
     pub fn new(
         sender: Sender<PublishMessage>,
         join_handle: thread::JoinHandle<Result<Option<R>, InternalError>>,
@@ -188,7 +188,7 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishFinisher<B, C, R>
     }
 }
 
-impl<B: Batch, C: PublisherContext, R: PublishedResult> Drop for PublishFinisher<B, C, R> {
+impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> Drop for PublishHandle<B, C, R> {
     fn drop(&mut self) {
         if let Some(sender) = self.sender.take() {
             match sender.send(PublishMessage::Dropped) {
@@ -204,11 +204,13 @@ impl<B: Batch, C: PublisherContext, R: PublishedResult> Drop for PublishFinisher
 /// This trait would go in sawtooth-lib
 pub trait PublishedResult: Send {}
 
-pub trait PublishedResultCreatorFactory<B: Batch, C: PublisherContext, R: PublishedResult> {
+pub trait PublishedResultCreatorFactory<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
     fn new_creator(&self) -> Result<Box<dyn PublishedResultCreator<B, C, R>>, InternalError>;
 }
 
-pub trait PublishedResultCreator<B: Batch, C: PublisherContext, R: PublishedResult>: Send {
+pub trait PublishedResultCreator<B: Batch, C: PublisherContext<B>, R: PublishedResult>:
+    Send
+{
     fn create(
         &self,
         context: C,
@@ -218,8 +220,8 @@ pub trait PublishedResultCreator<B: Batch, C: PublisherContext, R: PublishedResu
 }
 
 /// This trait would go in sawtooth-lib
-pub trait PublisherContext: Clone + Send {
-    fn add_batch_result(&mut self, batch_id: String, receipts: Vec<TransactionReceipt>);
+pub trait PublisherContext<B: Batch>: Send {
+    fn add_batch_results(&mut self, batch_results: Vec<BatchExecutionResult<B>>);
 
     fn compute_state_id(
         &mut self,
@@ -232,11 +234,11 @@ pub trait Batch: Send {
     fn id(&self) -> String;
 }
 
-pub trait BatchVerifierFactory<B: Batch, C: PublisherContext> {
+pub trait BatchVerifierFactory<B: Batch, C: PublisherContext<B>> {
     fn start(&mut self, context: C) -> Result<Box<dyn BatchVerifier<B, C>>, InternalError>;
 }
 
-pub trait BatchVerifier<B: Batch, C: PublisherContext>: Send {
+pub trait BatchVerifier<B: Batch, C: PublisherContext<B>>: Send {
     fn add_batch(&mut self, batch: B) -> Result<(), InternalError>;
 
     fn finalize(&mut self) -> Result<Vec<BatchExecutionResult<B>>, InternalError>;
@@ -274,8 +276,8 @@ fn main() -> Result<(), InternalError> {
 
     let result_creator_factory = Box::new(PublishBatchResultCreatorFactory::new());
     let batch_verifier_factory = Box::new(OneBatchVerifierFactory::new());
-    let mut publisher_starter: PublishStarter<OneBatch, BatchContext, PublishBatchResult> =
-        PublishStarter::new(result_creator_factory, batch_verifier_factory);
+    let mut publisher_starter: PublishFactory<OneBatch, BatchContext, PublishBatchResult> =
+        PublishFactory::new(result_creator_factory, batch_verifier_factory);
 
     let pending_batches = Box::new(BatchIter::new());
 
