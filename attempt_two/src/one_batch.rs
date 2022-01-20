@@ -35,7 +35,6 @@ pub struct BatchContext {
     batch_results: Vec<BatchExecutionResult<OneBatch>>,
 }
 
-
 impl BatchContext {
     pub fn new(circuit_id: String, service_id: String, starting_commit_hash: String) -> Self {
         BatchContext {

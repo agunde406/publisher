@@ -33,11 +33,8 @@ struct PublishFactory<
     batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
 }
 
-impl<
-        B: 'static + Batch,
-        C: 'static + PublisherContext<B>,
-        R: 'static + PublishedResult,
-    > PublishFactory<B, C, R>
+impl<B: 'static + Batch, C: 'static + PublisherContext<B>, R: 'static + PublishedResult>
+    PublishFactory<B, C, R>
 {
     pub fn new(
         result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
@@ -60,13 +57,13 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
     /// * `context` - Implementation specific context for the publisher
     /// * `batches` - An interator the returns the next batch to execute
     ///
-    /// Returns a PublishFinisher that can be used to finish or cancel the executing batch
+    /// Returns a PublishHandle that can be used to finish or cancel the executing batch
     ///
     fn start(
         &mut self,
         mut context: C,
         mut batches: Box<dyn PendingBatches<B>>,
-    ) -> Result<PublishFinisher<B, C, R>, InternalError> {
+    ) -> Result<PublishHandle<B, C, R>, InternalError> {
         let (sender, rc) = channel();
         let mut verifier = self.batch_verifier_factory.start(context.clone())?;
         let result_creator = self.result_creator_factory.new_creator()?;
@@ -98,7 +95,6 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
                         txn_receipts.append(&mut batch_result.receipts.to_vec())
                     }
 
-
                     context.add_batch_results(results.to_vec());
 
                     let state_root = context.compute_state_id(&txn_receipts)?;
@@ -117,18 +113,18 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
             };
         });
 
-        Ok(PublishFinisher::new(sender, join_handle))
+        Ok(PublishHandle::new(sender, join_handle))
     }
 }
 
-struct PublishFinisher<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
+struct PublishHandle<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
     sender: Option<Sender<PublishMessage>>,
     join_handle: Option<thread::JoinHandle<Result<Option<R>, InternalError>>>,
     _context: PhantomData<C>,
     _batch: PhantomData<B>,
 }
 
-impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishFinisher<B, C, R> {
+impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishHandle<B, C, R> {
     pub fn new(
         sender: Sender<PublishMessage>,
         join_handle: thread::JoinHandle<Result<Option<R>, InternalError>>,
@@ -192,7 +188,7 @@ impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishFinisher<B, C,
     }
 }
 
-impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> Drop for PublishFinisher<B, C, R> {
+impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> Drop for PublishHandle<B, C, R> {
     fn drop(&mut self) {
         if let Some(sender) = self.sender.take() {
             match sender.send(PublishMessage::Dropped) {
