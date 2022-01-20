@@ -26,14 +26,14 @@ enum PublishMessage {
 // ~~~~~~~~~~~~~  Publisher Struct Definitions ~~~~~~~~~~~~~~~~~~~~~~~~~
 struct PublishStarter<
     B: 'static + Batch,
-    C: 'static + PublisherContext,
+    C: 'static + PublisherContext + Clone,
     R: 'static + PublishedResult,
 > {
     result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
     batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
 }
 
-impl<B: 'static + Batch, C: 'static + PublisherContext, R: 'static + PublishedResult>
+impl<B: 'static + Batch, C: 'static + PublisherContext + Clone, R: 'static + PublishedResult>
     PublishStarter<B, C, R>
 {
     pub fn new(
@@ -47,7 +47,7 @@ impl<B: 'static + Batch, C: 'static + PublisherContext, R: 'static + PublishedRe
     }
 }
 
-impl<B: Batch, C: PublisherContext, R: PublishedResult> PublishStarter<B, C, R> {
+impl<B: Batch, C: PublisherContext + Clone, R: PublishedResult> PublishStarter<B, C, R> {
     /// Start building the next publishable unit, referred to as a block going forward
     /// The publisher will start pulling batches off of a pending queue for the provided service
     /// and
@@ -218,7 +218,7 @@ pub trait PublishedResultCreator<B: Batch, C: PublisherContext, R: PublishedResu
 }
 
 /// This trait would go in sawtooth-lib
-pub trait PublisherContext: Clone + Send {
+pub trait PublisherContext: Send {
     fn add_batch_result(&mut self, batch_id: String, receipts: Vec<TransactionReceipt>);
 
     fn compute_state_id(
