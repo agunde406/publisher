@@ -24,7 +24,7 @@ enum PublishMessage {
 }
 
 // ~~~~~~~~~~~~~  Publisher Struct Definitions ~~~~~~~~~~~~~~~~~~~~~~~~~
-struct PublishStarter<
+struct PublishFactory<
     B: 'static + Batch,
     C: 'static + PublisherContext<B>,
     R: 'static + PublishedResult,
@@ -37,7 +37,7 @@ impl<
         B: 'static + Batch,
         C: 'static + PublisherContext<B>,
         R: 'static + PublishedResult,
-    > PublishStarter<B, C, R>
+    > PublishFactory<B, C, R>
 {
     pub fn new(
         result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
@@ -50,7 +50,7 @@ impl<
     }
 }
 
-impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> PublishStarter<B, C, R> {
+impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> PublishFactory<B, C, R> {
     /// Start building the next publishable unit, referred to as a block going forward
     /// The publisher will start pulling batches off of a pending queue for the provided service
     /// and
@@ -280,8 +280,8 @@ fn main() -> Result<(), InternalError> {
 
     let result_creator_factory = Box::new(PublishBatchResultCreatorFactory::new());
     let batch_verifier_factory = Box::new(OneBatchVerifierFactory::new());
-    let mut publisher_starter: PublishStarter<OneBatch, BatchContext, PublishBatchResult> =
-        PublishStarter::new(result_creator_factory, batch_verifier_factory);
+    let mut publisher_starter: PublishFactory<OneBatch, BatchContext, PublishBatchResult> =
+        PublishFactory::new(result_creator_factory, batch_verifier_factory);
 
     let pending_batches = Box::new(BatchIter::new());
 
