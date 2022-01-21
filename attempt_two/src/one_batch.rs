@@ -182,6 +182,9 @@ impl BatchIter {
 
 impl PendingBatches<OneBatch> for BatchIter {
     fn next(&mut self) -> Result<Option<OneBatch>, InternalError> {
+        if self.batch.is_none() {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
         Ok(self.batch.take())
     }
 }

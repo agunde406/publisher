@@ -14,10 +14,11 @@
 mod one_batch;
 
 use std::marker::PhantomData;
-use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
-enum PublishMessage {
+enum PublishMessage<B: Batch> {
+    NewBatch { batch: B },
     Cancel,
     Finish,
     Dropped,
@@ -65,18 +66,35 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
         mut batches: Box<dyn PendingBatches<B>>,
     ) -> Result<PublishHandle<B, C, R>, InternalError> {
         let (sender, rc) = channel();
+        let batch_sender = sender.clone();
         let mut verifier = self.batch_verifier_factory.start(context.clone())?;
         let result_creator = self.result_creator_factory.new_creator()?;
-        let join_handle = thread::spawn(move || loop {
-            // TODO fix very tight loop here
-            // Should the batch verifier take the iterator here instead of a having a batch passed
-            //  one by one?
-            if let Some(batch) = batches.next()? {
-                verifier.add_batch(batch)?;
-            }
 
+        let _join_handle = thread::spawn(move || loop {
+            // assume this will block until a batch is ready or return None if no more will be
+            // added
+            if let Ok(Some(batch)) = batches.next() {
+                if batch_sender
+                    .send(PublishMessage::NewBatch { batch })
+                    .is_err()
+                {
+                    println!("Unable to send new batch message");
+                    break;
+                }
+            } else {
+                println!("Shutting down pending batch thread");
+                break;
+            }
+        });
+
+        let join_handle = thread::spawn(move || loop {
             // Check to see if the batch result should be finished/canceled
-            match rc.try_recv() {
+            match rc.recv() {
+                Ok(PublishMessage::NewBatch { batch }) => {
+                    println!("Received New Batch");
+
+                    verifier.add_batch(batch)?;
+                }
                 Ok(PublishMessage::Cancel) => {
                     println!("Received Cancel");
 
@@ -105,7 +123,6 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
                     println!("Finisher was dropped, so break loop");
                     return Ok(None);
                 }
-                Err(TryRecvError::Empty) => (),
                 Err(_) => {
                     println!("Disconnected");
                     return Err(InternalError);
@@ -118,22 +135,20 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
 }
 
 struct PublishHandle<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
-    sender: Option<Sender<PublishMessage>>,
+    sender: Option<Sender<PublishMessage<B>>>,
     join_handle: Option<thread::JoinHandle<Result<Option<R>, InternalError>>>,
     _context: PhantomData<C>,
-    _batch: PhantomData<B>,
 }
 
 impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishHandle<B, C, R> {
     pub fn new(
-        sender: Sender<PublishMessage>,
+        sender: Sender<PublishMessage<B>>,
         join_handle: thread::JoinHandle<Result<Option<R>, InternalError>>,
     ) -> Self {
         Self {
             sender: Some(sender),
             join_handle: Some(join_handle),
             _context: PhantomData,
-            _batch: PhantomData,
         }
     }
 
@@ -299,6 +314,10 @@ fn main() -> Result<(), InternalError> {
     );
 
     let publisher_finisher = publisher_starter.start(context, pending_batches)?;
+
+    // add sleep between starting thread and finishing
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
     let result = publisher_finisher.finish()?;
 
     println!("Results {:?}", result);
