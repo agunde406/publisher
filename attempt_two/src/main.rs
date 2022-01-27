@@ -231,7 +231,9 @@ pub trait PublisherContext<B: Batch>: Send {
 
 // This trait would go in sawtooth-lib
 pub trait Batch: Send {
-    fn id(&self) -> String;
+    fn id(&self) -> &str;
+
+    fn transactions(&self) -> &[Transaction];
 }
 
 pub trait BatchVerifierFactory<B: Batch, C: PublisherContext<B>> {
@@ -257,6 +259,9 @@ pub struct InternalError;
 /// This struct is in sawtooth-lib
 #[derive(Debug, Clone)]
 pub struct TransactionReceipt;
+
+#[derive(Debug, Clone)]
+pub struct Transaction;
 
 /// Result of executing a batch.
 #[derive(Debug, Clone)]

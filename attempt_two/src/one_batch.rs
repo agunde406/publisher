@@ -16,7 +16,7 @@
 use super::{
     Batch, BatchExecutionResult, BatchVerifier, BatchVerifierFactory, InternalError,
     PendingBatches, PublishedResult, PublishedResultCreator, PublishedResultCreatorFactory,
-    PublisherContext, TransactionReceipt,
+    PublisherContext, TransactionReceipt, Transaction
 };
 
 #[derive(Clone, Debug)]
@@ -63,11 +63,16 @@ impl PublisherContext<OneBatch> for BatchContext {
 #[derive(Clone, Debug)]
 pub struct OneBatch {
     id: String,
+    transactions: Vec<Transaction>
 }
 
 impl Batch for OneBatch {
-    fn id(&self) -> String {
-        self.id.to_string()
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn transactions(&self) -> &[Transaction] {
+        &self.transactions
     }
 }
 
@@ -175,6 +180,7 @@ impl BatchIter {
         Self {
             batch: Some(OneBatch {
                 id: "new-batch".to_string(),
+                transactions: vec![Transaction]
             }),
         }
     }
