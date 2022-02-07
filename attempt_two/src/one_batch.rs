@@ -13,11 +13,13 @@
 // limitations under the License.
 
 //! Example implmentations, currently return test data but could be updated actually use transact
+
 use super::{
     Batch, BatchExecutionResult, BatchVerifier, BatchVerifierFactory, InternalError,
     PendingBatches, PublishedResult, PublishedResultCreator, PublishedResultCreatorFactory,
-    PublisherContext, TransactionReceipt,
+    PublisherContext, Transaction, TransactionReceipt,
 };
+use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
 pub struct PublishBatchResult {
@@ -32,7 +34,7 @@ pub struct BatchContext {
     _circuit_id: String,
     _service_id: String,
     _starting_commit_hash: String,
-    batch_results: Vec<BatchExecutionResult<OneBatch>>,
+    batch_results: Vec<BatchExecutionResult<OneBatch, OneTransaction>>,
 }
 
 impl BatchContext {
@@ -47,8 +49,11 @@ impl BatchContext {
 }
 
 /// This implementation could go into Scabbard
-impl PublisherContext<OneBatch> for BatchContext {
-    fn add_batch_results(&mut self, batch_results: Vec<BatchExecutionResult<OneBatch>>) {
+impl PublisherContext<OneBatch, OneTransaction> for BatchContext {
+    fn add_batch_results(
+        &mut self,
+        batch_results: Vec<BatchExecutionResult<OneBatch, OneTransaction>>,
+    ) {
         self.batch_results.extend(batch_results)
     }
 
@@ -63,11 +68,37 @@ impl PublisherContext<OneBatch> for BatchContext {
 #[derive(Clone, Debug)]
 pub struct OneBatch {
     id: String,
+    transactions: Vec<OneTransaction>,
 }
 
-impl Batch for OneBatch {
-    fn id(&self) -> String {
-        self.id.to_string()
+impl Batch<OneTransaction> for OneBatch {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn transactions(&self) -> &[OneTransaction] {
+        &self.transactions
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OneTransaction {
+    id: String,
+    payload: Vec<u8>,
+    header: Vec<u8>,
+}
+
+impl Transaction for OneTransaction {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    fn header(&self) -> &[u8] {
+        &self.header
     }
 }
 
@@ -80,13 +111,13 @@ impl PublishBatchResultCreatorFactory {
     }
 }
 
-impl PublishedResultCreatorFactory<OneBatch, BatchContext, PublishBatchResult>
+impl PublishedResultCreatorFactory<OneBatch, BatchContext, PublishBatchResult, OneTransaction>
     for PublishBatchResultCreatorFactory
 {
     fn new_creator(
         &self,
     ) -> Result<
-        Box<dyn PublishedResultCreator<OneBatch, BatchContext, PublishBatchResult>>,
+        Box<dyn PublishedResultCreator<OneBatch, BatchContext, PublishBatchResult, OneTransaction>>,
         InternalError,
     > {
         Ok(Box::new(PublishBatchResultCreator {}))
@@ -96,13 +127,13 @@ impl PublishedResultCreatorFactory<OneBatch, BatchContext, PublishBatchResult>
 #[derive(Clone, Debug)]
 pub struct PublishBatchResultCreator {}
 
-impl PublishedResultCreator<OneBatch, BatchContext, PublishBatchResult>
+impl PublishedResultCreator<OneBatch, BatchContext, PublishBatchResult, OneTransaction>
     for PublishBatchResultCreator
 {
     fn create(
         &self,
         _context: BatchContext,
-        batch_results: Vec<BatchExecutionResult<OneBatch>>,
+        batch_results: Vec<BatchExecutionResult<OneBatch, OneTransaction>>,
         resulting_state_root: String,
     ) -> Result<PublishBatchResult, InternalError> {
         if batch_results.len() != 1 {
@@ -127,11 +158,11 @@ impl OneBatchVerifierFactory {
     }
 }
 
-impl BatchVerifierFactory<OneBatch, BatchContext> for OneBatchVerifierFactory {
+impl BatchVerifierFactory<OneBatch, BatchContext, OneTransaction> for OneBatchVerifierFactory {
     fn start(
         &mut self,
         context: BatchContext,
-    ) -> Result<Box<dyn BatchVerifier<OneBatch, BatchContext>>, InternalError> {
+    ) -> Result<Box<dyn BatchVerifier<OneBatch, BatchContext, OneTransaction>>, InternalError> {
         Ok(Box::new(OneBatchVerifier {
             _context: context,
             batch: None,
@@ -145,19 +176,22 @@ pub struct OneBatchVerifier {
     batch: Option<OneBatch>,
 }
 
-impl BatchVerifier<OneBatch, BatchContext> for OneBatchVerifier {
+impl BatchVerifier<OneBatch, BatchContext, OneTransaction> for OneBatchVerifier {
     fn add_batch(&mut self, batch: OneBatch) -> Result<(), InternalError> {
         self.batch = Some(batch);
         Ok(())
     }
 
-    fn finalize(&mut self) -> Result<Vec<BatchExecutionResult<OneBatch>>, InternalError> {
+    fn finalize(
+        &mut self,
+    ) -> Result<Vec<BatchExecutionResult<OneBatch, OneTransaction>>, InternalError> {
         Ok(vec![BatchExecutionResult {
             /// The `BatchPair` which was executed.
             batch: self.batch.take().ok_or(InternalError)?,
 
             /// The receipts for each transaction in the batch.
             receipts: vec![TransactionReceipt],
+            _transaction: PhantomData,
         }])
     }
 
@@ -175,12 +209,17 @@ impl BatchIter {
         Self {
             batch: Some(OneBatch {
                 id: "new-batch".to_string(),
+                transactions: vec![OneTransaction {
+                    id: "new-txn".to_string(),
+                    payload: "payload".as_bytes().to_vec(),
+                    header: "header".as_bytes().to_vec(),
+                }],
             }),
         }
     }
 }
 
-impl PendingBatches<OneBatch> for BatchIter {
+impl PendingBatches<OneBatch, OneTransaction> for BatchIter {
     fn next(&mut self) -> Result<Option<OneBatch>, InternalError> {
         Ok(self.batch.take())
     }

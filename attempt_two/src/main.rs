@@ -25,29 +25,42 @@ enum PublishMessage {
 
 // ~~~~~~~~~~~~~  Publisher Struct Definitions ~~~~~~~~~~~~~~~~~~~~~~~~~
 struct PublishFactory<
-    B: 'static + Batch,
-    C: 'static + PublisherContext<B>,
+    B: 'static + Batch<T>,
+    C: 'static + PublisherContext<B, T>,
     R: 'static + PublishedResult,
+    T: 'static + Transaction,
 > {
-    result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
-    batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
+    result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R, T>>,
+    batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C, T>>,
+    _transaction: PhantomData<T>,
 }
 
-impl<B: 'static + Batch, C: 'static + PublisherContext<B>, R: 'static + PublishedResult>
-    PublishFactory<B, C, R>
+impl<
+        B: 'static + Batch<T>,
+        C: 'static + PublisherContext<B, T>,
+        R: 'static + PublishedResult,
+        T: Transaction,
+    > PublishFactory<B, C, R, T>
 {
     pub fn new(
-        result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R>>,
-        batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C>>,
+        result_creator_factory: Box<dyn PublishedResultCreatorFactory<B, C, R, T>>,
+        batch_verifier_factory: Box<dyn BatchVerifierFactory<B, C, T>>,
     ) -> Self {
         Self {
             result_creator_factory,
             batch_verifier_factory,
+            _transaction: PhantomData,
         }
     }
 }
 
-impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> PublishFactory<B, C, R> {
+impl<
+        B: Batch<T> + Clone,
+        C: PublisherContext<B, T> + Clone,
+        R: PublishedResult,
+        T: Transaction + Clone,
+    > PublishFactory<B, C, R, T>
+{
     /// Start building the next publishable unit, referred to as a block going forward
     /// The publisher will start pulling batches off of a pending queue for the provided service
     /// and
@@ -62,8 +75,8 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
     fn start(
         &mut self,
         mut context: C,
-        mut batches: Box<dyn PendingBatches<B>>,
-    ) -> Result<PublishHandle<B, C, R>, InternalError> {
+        mut batches: Box<dyn PendingBatches<B, T>>,
+    ) -> Result<PublishHandle<B, C, R, T>, InternalError> {
         let (sender, rc) = channel();
         let mut verifier = self.batch_verifier_factory.start(context.clone())?;
         let result_creator = self.result_creator_factory.new_creator()?;
@@ -117,14 +130,17 @@ impl<B: Batch + Clone, C: PublisherContext<B> + Clone, R: PublishedResult> Publi
     }
 }
 
-struct PublishHandle<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
+struct PublishHandle<B: Batch<T>, C: PublisherContext<B, T>, R: PublishedResult, T: Transaction> {
     sender: Option<Sender<PublishMessage>>,
     join_handle: Option<thread::JoinHandle<Result<Option<R>, InternalError>>>,
     _context: PhantomData<C>,
     _batch: PhantomData<B>,
+    _transaction: PhantomData<T>,
 }
 
-impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishHandle<B, C, R> {
+impl<B: Batch<T>, C: PublisherContext<B, T>, R: PublishedResult, T: Transaction>
+    PublishHandle<B, C, R, T>
+{
     pub fn new(
         sender: Sender<PublishMessage>,
         join_handle: thread::JoinHandle<Result<Option<R>, InternalError>>,
@@ -134,6 +150,7 @@ impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishHandle<B, C, R
             join_handle: Some(join_handle),
             _context: PhantomData,
             _batch: PhantomData,
+            _transaction: PhantomData,
         }
     }
 
@@ -188,7 +205,9 @@ impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> PublishHandle<B, C, R
     }
 }
 
-impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> Drop for PublishHandle<B, C, R> {
+impl<B: Batch<T>, C: PublisherContext<B, T>, R: PublishedResult, T: Transaction> Drop
+    for PublishHandle<B, C, R, T>
+{
     fn drop(&mut self) {
         if let Some(sender) = self.sender.take() {
             match sender.send(PublishMessage::Dropped) {
@@ -204,24 +223,34 @@ impl<B: Batch, C: PublisherContext<B>, R: PublishedResult> Drop for PublishHandl
 /// This trait would go in sawtooth-lib
 pub trait PublishedResult: Send {}
 
-pub trait PublishedResultCreatorFactory<B: Batch, C: PublisherContext<B>, R: PublishedResult> {
-    fn new_creator(&self) -> Result<Box<dyn PublishedResultCreator<B, C, R>>, InternalError>;
+pub trait PublishedResultCreatorFactory<
+    B: Batch<T>,
+    C: PublisherContext<B, T>,
+    R: PublishedResult,
+    T: Transaction,
+>
+{
+    fn new_creator(&self) -> Result<Box<dyn PublishedResultCreator<B, C, R, T>>, InternalError>;
 }
 
-pub trait PublishedResultCreator<B: Batch, C: PublisherContext<B>, R: PublishedResult>:
-    Send
+pub trait PublishedResultCreator<
+    B: Batch<T>,
+    C: PublisherContext<B, T>,
+    R: PublishedResult,
+    T: Transaction,
+>: Send
 {
     fn create(
         &self,
         context: C,
-        batch_results: Vec<BatchExecutionResult<B>>,
+        batch_results: Vec<BatchExecutionResult<B, T>>,
         resulting_state_root: String,
     ) -> Result<R, InternalError>;
 }
 
 /// This trait would go in sawtooth-lib
-pub trait PublisherContext<B: Batch>: Send {
-    fn add_batch_results(&mut self, batch_results: Vec<BatchExecutionResult<B>>);
+pub trait PublisherContext<B: Batch<T>, T: Transaction>: Send {
+    fn add_batch_results(&mut self, batch_results: Vec<BatchExecutionResult<B, T>>);
 
     fn compute_state_id(
         &mut self,
@@ -230,23 +259,33 @@ pub trait PublisherContext<B: Batch>: Send {
 }
 
 // This trait would go in sawtooth-lib
-pub trait Batch: Send {
-    fn id(&self) -> String;
+pub trait Batch<T: Transaction>: Send {
+    fn id(&self) -> &str;
+
+    fn transactions(&self) -> &[T];
 }
 
-pub trait BatchVerifierFactory<B: Batch, C: PublisherContext<B>> {
-    fn start(&mut self, context: C) -> Result<Box<dyn BatchVerifier<B, C>>, InternalError>;
+pub trait Transaction: Send {
+    fn id(&self) -> &str;
+
+    fn payload(&self) -> &[u8];
+
+    fn header(&self) -> &[u8];
 }
 
-pub trait BatchVerifier<B: Batch, C: PublisherContext<B>>: Send {
+pub trait BatchVerifierFactory<B: Batch<T>, C: PublisherContext<B, T>, T: Transaction> {
+    fn start(&mut self, context: C) -> Result<Box<dyn BatchVerifier<B, C, T>>, InternalError>;
+}
+
+pub trait BatchVerifier<B: Batch<T>, C: PublisherContext<B, T>, T: Transaction>: Send {
     fn add_batch(&mut self, batch: B) -> Result<(), InternalError>;
 
-    fn finalize(&mut self) -> Result<Vec<BatchExecutionResult<B>>, InternalError>;
+    fn finalize(&mut self) -> Result<Vec<BatchExecutionResult<B, T>>, InternalError>;
 
     fn cancel(&mut self) -> Result<(), InternalError>;
 }
 
-pub trait PendingBatches<B: Batch>: Send {
+pub trait PendingBatches<B: Batch<T>, T: Transaction>: Send {
     fn next(&mut self) -> Result<Option<B>, InternalError>;
 }
 
@@ -260,24 +299,30 @@ pub struct TransactionReceipt;
 
 /// Result of executing a batch.
 #[derive(Debug, Clone)]
-pub struct BatchExecutionResult<B: Batch> {
+pub struct BatchExecutionResult<B: Batch<T>, T: Transaction> {
     /// The `BatchPair` which was executed.
     pub batch: B,
 
     /// The receipts for each transaction in the batch.
     pub receipts: Vec<TransactionReceipt>,
+
+    _transaction: PhantomData<T>,
 }
 
 fn main() -> Result<(), InternalError> {
     use one_batch::{
-        BatchContext, BatchIter, OneBatch, OneBatchVerifierFactory, PublishBatchResult,
-        PublishBatchResultCreatorFactory,
+        BatchContext, BatchIter, OneBatch, OneBatchVerifierFactory, OneTransaction,
+        PublishBatchResult, PublishBatchResultCreatorFactory,
     };
 
     let result_creator_factory = Box::new(PublishBatchResultCreatorFactory::new());
     let batch_verifier_factory = Box::new(OneBatchVerifierFactory::new());
-    let mut publisher_starter: PublishFactory<OneBatch, BatchContext, PublishBatchResult> =
-        PublishFactory::new(result_creator_factory, batch_verifier_factory);
+    let mut publisher_starter: PublishFactory<
+        OneBatch,
+        BatchContext,
+        PublishBatchResult,
+        OneTransaction,
+    > = PublishFactory::new(result_creator_factory, batch_verifier_factory);
 
     let pending_batches = Box::new(BatchIter::new());
 
